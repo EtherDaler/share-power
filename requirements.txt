@@ -1,2 +1,9 @@
-# Координатор и гибридный конфиг (HybridConfig.from_yaml)
+# DistGPU — координатор (VPS, CUDA не нужна)
+# pip install -r requirements.txt
+
+fastapi>=0.110
+uvicorn[standard]>=0.27
+websockets>=12.0
+python-multipart>=0.0.9
+nbformat>=5.9
 pyyaml>=6.0
