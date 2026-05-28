@@ -178,8 +178,18 @@ function showLogs(job_id) {
       logsEl.scrollTop = logsEl.scrollHeight;
     }
   };
-  ws.onclose = () => {
-    logsEl.textContent += "\n--- Задача завершена ---";
+  ws.onclose = async () => {
+    try {
+      const jr = await fetch(`${API}/api/jobs/${job_id}`);
+      const j = await jr.json();
+      const st = j.status || "unknown";
+      logsEl.textContent += `\n--- Статус задачи: ${st} ---\n`;
+      if (st === "failed") {
+        logsEl.textContent += "Обучение завершилось с ошибкой. См. логи выше.\n";
+      }
+    } catch (_) {
+      logsEl.textContent += "\n--- Соединение с логами закрыто ---\n";
+    }
     runBtn.textContent = "Запустить обучение";
     runBtn.disabled = false;
   };

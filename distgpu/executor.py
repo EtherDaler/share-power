@@ -148,6 +148,42 @@ if __dg_os.environ.get("DISTGPU_USE_PIPELINE") == "1":
     raise SystemExit(0)
 '''
 
+# Защита окружения до user code: CUDA, Windows DataLoader, headless matplotlib
+RUNTIME_GUARDS_CODE = '''
+import os as _dg_os
+import sys as _dg_sys
+
+_dg_os.environ.setdefault("MPLBACKEND", "Agg")
+
+if not _ddp_active:
+    import torch as _dg_torch
+    if not _dg_torch.cuda.is_available():
+        raise RuntimeError(
+            "[DistGPU] CUDA недоступна на воркере. "
+            "Для RTX 50xx установите PyTorch nightly-cu128 (DISTGPU_TORCH=nightly-cu128)."
+        )
+
+if _dg_sys.platform == "win32":
+    import torch.utils.data as _dg_tud
+    _BaseDataLoader = _dg_tud.DataLoader
+
+    class _WinSafeDataLoader(_BaseDataLoader):
+        def __init__(self, *args, num_workers=0, pin_memory=False, **kwargs):
+            if num_workers > 0:
+                print("[DistGPU] Windows: DataLoader num_workers сброшен в 0")
+                num_workers = 0
+                pin_memory = False
+            super().__init__(
+                *args, num_workers=num_workers, pin_memory=pin_memory, **kwargs
+            )
+
+    _dg_tud.DataLoader = _WinSafeDataLoader
+
+_dg_work = _dg_os.environ.get("DISTGPU_JOB_WORK_DIR", "").strip()
+if _dg_work:
+    print(f"[DistGPU] Рабочая папка задачи: {_dg_work}")
+'''
+
 DDP_CLEANUP_CODE = '''
 cleanup_ddp()
 print("[Worker] Обучение завершено.")
@@ -175,6 +211,9 @@ def notebook_to_ddp_script(nb_bytes: bytes) -> str:
 
 # ===== PIPELINE (гибридный режим; при включении — выход до user code) =====
 {PIPELINE_GATE_CODE}
+
+# ===== RUNTIME GUARDS (CUDA / Windows / matplotlib) =====
+{RUNTIME_GUARDS_CODE}
 
 # ===== USER CODE =====
 {user_code}

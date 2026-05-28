@@ -46,6 +46,13 @@ python worker.py
 
 Или с аргументами: `python worker.py --server ws://HOST:8765/worker --token YOUR_TOKEN`
 
+**RTX 5060 / 5070 / 5080 / 5090 (Blackwell, sm_120):** стабильный `cu124` не подходит — worker сам выберет `nightly-cu128`. Если уже ставился `cu124`, переустановите:
+
+```powershell
+$env:DISTGPU_TORCH = "nightly-cu128"
+python worker.py --reinstall-torch
+```
+
 В веб-интерфейсе координатора отображаются число онлайн-воркеров, суммарная VRAM и карточки каждого GPU.
 
 **Нативный C++-воркер** (без Python для клиента): `worker/native/` — см. [AGENTS.MD](AGENTS.MD).
@@ -73,6 +80,25 @@ python worker.py
    sudo ufw reload
    ```
 5. Запуск из **корня репозитория** с зависимостями: `pip install -r requirements.txt`, затем `export PYTHONPATH="$(pwd)"` и `python -m distgpu.coordinator`.
+
+### Воркер и ноутбуки (устранённые риски)
+
+| Проблема | Что сделано в коде |
+|----------|-------------------|
+| Обрыв WS во время обучения (`keepalive ping timeout`) | `run_job` в фоне, увеличен `ping_timeout` |
+| RTX 5060 / sm_120 | авто-пресет `nightly-cu128`, проверка после установки |
+| `num_workers>0` на Windows | в скрипт вставляется безопасный `DataLoader` |
+| Нет CUDA при `device=cuda` | явная ошибка до user code |
+| Повторный `run_job` при reconnect | игнор, если процесс уже крутится |
+| Потеря логов при закрытом WS | `_ws_send` с перехватом ошибок |
+| Артефакты задачи | `worker/.distgpu_runtime/jobs/<job_id>/` на **том же диске**, что и `worker.py` (не `C:\Users\...`) |
+| Отключение воркера | 30 с на reconnect, затем reschedule / резерв |
+
+**На воркере** для ноутбуков с `torchvision` / CIFAR: нужны интернет (скачивание данных и весов) и `shard_world_size=1`.
+
+**Локальные результаты** (например `output/model.pt`) остаются на машине воркера; в браузер идут только логи.
+
+**Диск воркера:** по умолчанию `worker/.distgpu_runtime/` (рядом с `worker.py`, например на `G:`). Свой путь: `DISTGPU_DATA_ROOT=G:\distgpu_storage`. В git не попадает (см. `.gitignore`). Папки `data/` и `output/` в корне репо тоже игнорируются — если они уже появились, удалите их перед коммитом.
 
 ---
 

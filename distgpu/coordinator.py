@@ -189,7 +189,10 @@ async def worker_websocket_endpoint(ws: WebSocket):
         job_for_reconnect = None
         if worker.current_job_id:
             job_for_reconnect = queue.get(worker.current_job_id)
-            if job_for_reconnect and job_for_reconnect.status == JobStatus.RUNNING:
+            if job_for_reconnect and job_for_reconnect.status in (
+                JobStatus.RUNNING,
+                JobStatus.ASSIGNED,
+            ):
                 sh = max(1, int(getattr(job_for_reconnect, "shard_world_size", 1) or 1))
                 if sh > 1:
                     if worker.id in getattr(
@@ -219,9 +222,14 @@ async def worker_websocket_endpoint(ws: WebSocket):
             }
             await ws.send_text(json.dumps(sync))
             sh = max(1, int(getattr(job_for_reconnect, "shard_world_size", 1) or 1))
-            if job_for_reconnect.status == JobStatus.RUNNING and sh <= 1:
+            if (
+                job_for_reconnect.status in (JobStatus.RUNNING, JobStatus.ASSIGNED)
+                and sh <= 1
+            ):
                 if assigned == worker.id:
+                    job_for_reconnect.status = JobStatus.RUNNING
                     await _send_run_job(ws, job_for_reconnect)
+                    await queue.save_job(job_for_reconnect)
 
         while True:
             raw_msg = await ws.receive_text()
@@ -273,7 +281,16 @@ async def worker_websocket_endpoint(ws: WebSocket):
         print(f"[Coordinator] Ошибка worker_ws: {e}")
     finally:
         if worker_id:
+            w = registry.get(worker_id)
+            had_running_job = (
+                w
+                and w.current_job_id
+                and (j := queue.get(w.current_job_id))
+                and j.status in (JobStatus.RUNNING, JobStatus.ASSIGNED)
+            )
             registry.disconnect(worker_id)
+            if had_running_job:
+                await monitor._handle_worker_failure(worker_id)
             dispatch.wake()
 
 

@@ -68,10 +68,12 @@ class HealthMonitor:
             return
         if max(1, int(getattr(job, "shard_world_size", 1) or 1)) > 1:
             return
-        job.status = JobStatus.FAILED
-        print(f"[Monitor] Воркер {worker_id} упал, задача {job.id} → FAILED")
-        await self.queue.save_job(job)
-        # Ждём STALE_TIMEOUT — вдруг воркер переподключится
+        # Не помечаем FAILED сразу: воркер может переподключиться за STALE_TIMEOUT
+        # и получить run_job снова (см. coordinator worker_ws reconnect).
+        print(
+            f"[Monitor] Воркер {worker_id} отключён во время задачи {job.id}, "
+            f"ждём reconnect ({STALE_TIMEOUT}s)…"
+        )
 
     async def _abort_shard_job_reschedule(self, job, failed_worker_id: str) -> None:
         """Падение участника FSDP-группы: отмена остальных и возврат задачи в очередь."""
@@ -94,8 +96,11 @@ class HealthMonitor:
     async def _replace_worker(self, failed_worker):
         """Находит замену для задачи упавшего воркера."""
         job = self.queue.get(failed_worker.current_job_id)
-        if not job or job.status == JobStatus.DONE:
+        if not job or job.status in (JobStatus.DONE, JobStatus.CANCELLED, JobStatus.DEAD):
+            self.registry.release_worker(failed_worker.id)
             return
+
+        self.registry.release_worker(failed_worker.id)
 
         if max(1, int(getattr(job, "shard_world_size", 1) or 1)) > 1:
             await self._abort_shard_job_reschedule(job, failed_worker.id)

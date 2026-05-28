@@ -16,6 +16,11 @@ env/
 # Данные координатора (SQLite, чекпоинты, логи)
 .distgpu_data/
 
+# Воркер: датасеты, модели, кэши (не в репозиторий)
+worker/.distgpu_runtime/
+data/
+output/
+
 # Сборка нативного воркера
 worker/native/build/
 worker/native/cmake-build-*/
