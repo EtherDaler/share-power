@@ -105,6 +105,10 @@ class JobQueue:
     def get(self, job_id: str) -> Optional[Job]:
         return self._jobs.get(job_id)
 
+    def list_for_owner(self, owner_id: str) -> list[Job]:
+        jobs = [j for j in self._jobs.values() if j.owner_id == owner_id]
+        return sorted(jobs, key=lambda j: j.created_at, reverse=True)
+
     def all(self) -> list[Job]:
         return list(self._jobs.values())
 

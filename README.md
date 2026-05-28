@@ -17,7 +17,7 @@
 pip install -r requirements.txt
 ```
 
-В [`requirements.txt`](requirements.txt): FastAPI, uvicorn, websockets, nbformat (конвертация `.ipynb`), PyYAML (гибридный конфиг и `pipeline_config` при submit).
+В [`requirements.txt`](requirements.txt): FastAPI, uvicorn, websockets, nbformat, PyYAML, PyJWT, passlib (bcrypt) для авторизации пользователей.
 
 ---
 
@@ -95,6 +95,13 @@ python worker.py --reinstall-torch
 | Отключение воркера | 30 с на reconnect, затем reschedule / резерв |
 
 **На воркере** для ноутбуков с `torchvision` / CIFAR: нужны интернет (скачивание данных и весов) и `shard_world_size=1`.
+
+**Пользователи:** регистрация и вход в веб-UI. Задачи и логи привязаны к аккаунту (JWT). В `.env` на координаторе задайте `DISTGPU_JWT_SECRET` (длинная случайная строка, ≥16 символов).
+
+```env
+DISTGPU_JWT_SECRET=ваша-длинная-случайная-строка
+WORKER_TOKEN=secret-token-123
+```
 
 **Локальные результаты** (например `output/model.pt`) остаются на машине воркера; в браузер идут только логи.
 

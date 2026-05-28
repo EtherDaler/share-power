@@ -4,7 +4,13 @@
   <meta charset="UTF-8">
   <title>DistGPU</title>
   <style>
-    body { font-family: sans-serif; max-width: 900px; margin: 40px auto; padding: 0 20px; }
+    body { font-family: sans-serif; max-width: 960px; margin: 40px auto; padding: 0 20px; }
+    .auth-box {
+      background: #f5f5f5; border: 1px solid #e0e0e0; border-radius: 8px;
+      padding: 20px; margin-bottom: 24px;
+    }
+    .auth-box input { padding: 8px 10px; margin: 4px 8px 4px 0; border: 1px solid #ccc; border-radius: 4px; }
+    .auth-row { margin-bottom: 10px; }
     .summary {
       display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
       gap: 12px; margin: 16px 0 24px;
@@ -21,52 +27,109 @@
       background: #e8f5e9; border: 1px solid #a5d6a7; min-width: 200px;
     }
     .worker.busy { background: #fff3e0; border-color: #ffcc80; }
-    .worker.offline { background: #fafafa; border-color: #ddd; color: #888; opacity: 0.85; }
     .worker .id { font-size: 11px; color: #888; }
-    .worker .vram { margin-top: 4px; }
     #drop-zone { border: 2px dashed #ccc; border-radius: 8px; padding: 40px;
                  text-align: center; cursor: pointer; margin: 20px 0; }
     #drop-zone.drag-over { border-color: #7c4dff; background: #f3f0ff; }
     #logs { background: #1e1e1e; color: #d4d4d4; padding: 16px; border-radius: 8px;
-            font-family: monospace; font-size: 12px; height: 400px;
+            font-family: monospace; font-size: 12px; height: 360px;
             overflow-y: auto; white-space: pre-wrap; display: none; }
-    button { padding: 10px 24px; background: #7c4dff; color: white;
-             border: none; border-radius: 6px; cursor: pointer; font-size: 15px; }
+    #jobs-table { width: 100%; border-collapse: collapse; font-size: 14px; margin: 12px 0 24px; }
+    #jobs-table th, #jobs-table td { border: 1px solid #e0e0e0; padding: 8px 10px; text-align: left; }
+    #jobs-table tr { cursor: pointer; }
+    #jobs-table tr:hover { background: #f3f0ff; }
+    #jobs-table tr.active { background: #e8eaf6; }
+    button { padding: 8px 18px; background: #7c4dff; color: white;
+             border: none; border-radius: 6px; cursor: pointer; font-size: 14px; }
     button:disabled { background: #ccc; cursor: not-allowed; }
+    button.secondary { background: #666; }
+    #app-panel { display: none; }
+    .err { color: #c62828; font-size: 13px; margin-top: 8px; }
+    .user-bar { margin-bottom: 12px; font-size: 14px; color: #444; }
   </style>
 </head>
 <body>
   <h1>DistGPU</h1>
 
-  <h3>Мощность кластера</h3>
-  <div class="summary" id="workers-summary">
-    <div class="stat"><div class="value" id="stat-online">—</div><div class="label">воркеров онлайн</div></div>
-    <div class="stat"><div class="value" id="stat-idle">—</div><div class="label">свободны</div></div>
-    <div class="stat"><div class="value" id="stat-vram-total">—</div><div class="label">суммарно VRAM</div></div>
-    <div class="stat"><div class="value" id="stat-vram-free">—</div><div class="label">свободно (idle)</div></div>
+  <div id="auth-panel" class="auth-box">
+    <h3 style="margin-top:0">Вход</h3>
+    <div class="auth-row">
+      <input type="text" id="auth-user" placeholder="Имя пользователя" autocomplete="username">
+      <input type="password" id="auth-pass" placeholder="Пароль (≥8)" autocomplete="current-password">
+    </div>
+    <button type="button" id="btn-login">Войти</button>
+    <button type="button" id="btn-register" class="secondary">Регистрация</button>
+    <div id="auth-err" class="err"></div>
   </div>
 
-  <h3>Воркеры</h3>
-  <div id="workers-list" class="workers-grid">Загрузка...</div>
+  <div id="app-panel">
+    <div class="user-bar">
+      Вы вошли как <strong id="current-user"></strong>
+      <button type="button" id="btn-logout" class="secondary" style="margin-left:12px">Выйти</button>
+    </div>
 
-  <h3>Загрузить задачу</h3>
-  <div id="drop-zone">
-    Перетащите .ipynb сюда или кликните для выбора
-    <input type="file" id="file-input" accept=".ipynb" style="display:none">
+    <h3>Мощность кластера</h3>
+    <div class="summary" id="workers-summary">
+      <div class="stat"><div class="value" id="stat-online">—</div><div class="label">воркеров онлайн</div></div>
+      <div class="stat"><div class="value" id="stat-idle">—</div><div class="label">свободны</div></div>
+      <div class="stat"><div class="value" id="stat-vram-total">—</div><div class="label">суммарно VRAM</div></div>
+      <div class="stat"><div class="value" id="stat-vram-free">—</div><div class="label">свободно (idle)</div></div>
+    </div>
+
+    <h3>Воркеры</h3>
+    <div id="workers-list" class="workers-grid">Загрузка...</div>
+
+    <h3>Мои задачи</h3>
+    <table id="jobs-table">
+      <thead><tr><th>ID</th><th>Статус</th><th>Воркеров FSDP</th><th>Создана</th></tr></thead>
+      <tbody id="jobs-body"><tr><td colspan="4" style="color:#999">Нет задач</td></tr></tbody>
+    </table>
+
+    <h3>Загрузить задачу</h3>
+    <div id="drop-zone">
+      Перетащите .ipynb сюда или кликните для выбора
+      <input type="file" id="file-input" accept=".ipynb" style="display:none">
+    </div>
+    <div id="file-name" style="color:#666; margin-bottom:12px;"></div>
+    <label style="display:block; margin:12px 0 8px;">
+      Воркеров под FSDP, 1 = один GPU
+      <input type="number" id="shard-n" min="1" max="16" value="1" style="margin-left:8px; width:64px;">
+    </label>
+    <button id="run-btn" disabled>Запустить обучение</button>
+
+    <h3 id="logs-title" style="display:none">Логи</h3>
+    <p id="job-hint" style="display:none;color:#666;font-size:13px;"></p>
+    <div id="logs"></div>
   </div>
-  <div id="file-name" style="color:#666; margin-bottom:12px;"></div>
-  <label style="display:block; margin:12px 0 8px;">
-    Воркеров под FSDP (шардирование памяти), 1 = один GPU без группы
-    <input type="number" id="shard-n" min="1" max="16" value="1"
-           style="margin-left:8px; width:64px;">
-  </label>
-  <button id="run-btn" disabled>Запустить обучение</button>
-
-  <h3 id="logs-title" style="display:none">Логи</h3>
-  <div id="logs"></div>
 
 <script>
 const API = "";
+const TOKEN_KEY = "distgpu_access_token";
+const JOB_KEY = "distgpu_last_job";
+let logWs = null;
+let selectedFile = null;
+let activeJobId = null;
+
+function getToken() {
+  return localStorage.getItem(TOKEN_KEY) || "";
+}
+
+function setToken(t) {
+  if (t) localStorage.setItem(TOKEN_KEY, t);
+  else localStorage.removeItem(TOKEN_KEY);
+}
+
+async function apiFetch(path, opts = {}) {
+  const headers = { ...(opts.headers || {}) };
+  const t = getToken();
+  if (t) headers["Authorization"] = "Bearer " + t;
+  const r = await fetch(API + path, { ...opts, headers });
+  if (r.status === 401) {
+    logout();
+    throw new Error("Сессия истекла — войдите снова");
+  }
+  return r;
+}
 
 function formatMb(mb) {
   if (!mb || mb <= 0) return "—";
@@ -74,126 +137,236 @@ function formatMb(mb) {
   return mb + " MB";
 }
 
-function statusLabel(w) {
-  if (!w.online) return "офлайн";
-  if (w.status === "idle") return "свободен";
-  if (w.status === "busy") return "занят";
-  return w.status;
+function formatTime(ts) {
+  if (!ts) return "—";
+  return new Date(ts * 1000).toLocaleString();
 }
+
+function showAuth() {
+  document.getElementById("auth-panel").style.display = "block";
+  document.getElementById("app-panel").style.display = "none";
+}
+
+function showApp(username) {
+  document.getElementById("auth-panel").style.display = "none";
+  document.getElementById("app-panel").style.display = "block";
+  document.getElementById("current-user").textContent = username;
+  loadWorkers();
+  loadMyJobs();
+}
+
+function logout() {
+  setToken("");
+  localStorage.removeItem(JOB_KEY);
+  if (logWs) { logWs.close(); logWs = null; }
+  showAuth();
+}
+
+async function tryRestoreSession() {
+  if (!getToken()) { showAuth(); return; }
+  try {
+    const r = await apiFetch("/api/auth/me");
+    if (!r.ok) throw new Error();
+    const u = await r.json();
+    showApp(u.username);
+    const jobId = new URLSearchParams(location.search).get("job") || localStorage.getItem(JOB_KEY);
+    if (jobId) openJob(jobId);
+  } catch {
+    logout();
+  }
+}
+
+document.getElementById("btn-login").onclick = async () => {
+  const err = document.getElementById("auth-err");
+  err.textContent = "";
+  try {
+    const r = await fetch(API + "/api/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        username: document.getElementById("auth-user").value,
+        password: document.getElementById("auth-pass").value,
+      }),
+    });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.detail || "Ошибка входа");
+    setToken(data.access_token);
+    showApp(data.user.username);
+    loadMyJobs();
+  } catch (e) {
+    err.textContent = e.message;
+  }
+};
+
+document.getElementById("btn-register").onclick = async () => {
+  const err = document.getElementById("auth-err");
+  err.textContent = "";
+  try {
+    const r = await fetch(API + "/api/auth/register", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        username: document.getElementById("auth-user").value,
+        password: document.getElementById("auth-pass").value,
+      }),
+    });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.detail || "Ошибка регистрации");
+    setToken(data.access_token);
+    showApp(data.user.username);
+  } catch (e) {
+    err.textContent = e.message;
+  }
+};
+
+document.getElementById("btn-logout").onclick = logout;
 
 async function loadWorkers() {
   const r = await fetch(`${API}/api/workers`);
   const data = await r.json();
   const summary = data.summary || {};
-  const workers = data.workers || (Array.isArray(data) ? data : []);
-
+  const workers = data.workers || [];
   document.getElementById("stat-online").textContent = summary.online ?? 0;
   document.getElementById("stat-idle").textContent = summary.idle ?? 0;
   document.getElementById("stat-vram-total").textContent = formatMb(summary.total_vram_mb);
   document.getElementById("stat-vram-free").textContent = formatMb(summary.available_vram_mb);
-
   const el = document.getElementById("workers-list");
-  if (!workers.length) {
-    el.innerHTML = '<span style="color:#999">Нет зарегистрированных воркеров</span>';
-    return;
-  }
-
   const online = workers.filter(w => w.online);
   if (!online.length) {
     el.innerHTML = '<span style="color:#999">Нет подключённых воркеров</span>';
     return;
   }
-
-  el.innerHTML = workers
-    .filter(w => w.online)
-    .map(w => {
-      const g = w.gpu || {};
-      const name = g.name || (g.available === false ? "нет CUDA" : "GPU");
-      const total = g.vram_total_mb || 0;
-      const free = g.vram_free_mb ?? total;
-      const busy = w.status === "busy";
-      return `
-    <div class="worker ${busy ? "busy" : ""}">
-      <div><strong>${name}</strong></div>
-      <div class="vram">${formatMb(total)} всего · ${formatMb(free)} свободно</div>
-      <div><b>${statusLabel(w)}</b>${w.current_job_id ? " · job " + w.current_job_id : ""}</div>
-      <div class="id">id ${w.id}</div>
-    </div>`;
-    }).join("");
-}
-setInterval(loadWorkers, 3000);
-loadWorkers();
-
-let selectedFile = null;
-const dropZone = document.getElementById("drop-zone");
-const fileInput = document.getElementById("file-input");
-const runBtn   = document.getElementById("run-btn");
-
-dropZone.addEventListener("click", () => fileInput.click());
-fileInput.addEventListener("change", e => selectFile(e.target.files[0]));
-dropZone.addEventListener("dragover", e => { e.preventDefault(); dropZone.classList.add("drag-over"); });
-dropZone.addEventListener("dragleave", () => dropZone.classList.remove("drag-over"));
-dropZone.addEventListener("drop", e => {
-  e.preventDefault();
-  dropZone.classList.remove("drag-over");
-  selectFile(e.dataTransfer.files[0]);
-});
-
-function selectFile(file) {
-  if (!file || !file.name.endsWith(".ipynb")) return;
-  selectedFile = file;
-  document.getElementById("file-name").textContent = `Выбран: ${file.name}`;
-  runBtn.disabled = false;
+  el.innerHTML = online.map(w => {
+    const g = w.gpu || {};
+    const busy = w.status === "busy";
+    return `<div class="worker ${busy ? "busy" : ""}">
+      <div><strong>${g.name || "GPU"}</strong></div>
+      <div>${formatMb(g.vram_total_mb)} · <b>${busy ? "занят" : "свободен"}</b></div>
+      <div class="id">id ${w.id}</div></div>`;
+  }).join("");
 }
 
-runBtn.addEventListener("click", async () => {
-  if (!selectedFile) return;
-  runBtn.disabled = true;
-  runBtn.textContent = "Отправка...";
+async function loadMyJobs() {
+  const body = document.getElementById("jobs-body");
+  try {
+    const r = await apiFetch("/api/jobs");
+    const data = await r.json();
+    const jobs = data.jobs || [];
+    if (!jobs.length) {
+      body.innerHTML = '<tr><td colspan="4" style="color:#999">Нет задач</td></tr>';
+      return;
+    }
+    body.innerHTML = jobs.map(j => `
+      <tr data-job="${j.id}" class="${j.id === activeJobId ? "active" : ""}">
+        <td>${j.id}</td>
+        <td>${j.status}</td>
+        <td>${j.shard_world_size || 1}</td>
+        <td>${formatTime(j.created_at)}</td>
+      </tr>`).join("");
+    body.querySelectorAll("tr[data-job]").forEach(tr => {
+      tr.onclick = () => openJob(tr.dataset.job);
+    });
+  } catch (e) {
+    body.innerHTML = `<tr><td colspan="4" class="err">${e.message}</td></tr>`;
+  }
+}
 
-  const form = new FormData();
-  form.append("file", selectedFile);
-  const sn = document.getElementById("shard-n");
-  form.append("shard_world_size", sn ? String(parseInt(sn.value, 10) || 1) : "1");
+function rememberJob(jobId) {
+  localStorage.setItem(JOB_KEY, jobId);
+  const u = new URL(location.href);
+  u.searchParams.set("job", jobId);
+  history.replaceState(null, "", u);
+}
 
-  const r = await fetch(`${API}/api/submit`, { method: "POST", body: form });
-  const { job_id } = await r.json();
+function appendLogLine(el, text) {
+  el.textContent += text + "\n";
+  el.scrollTop = el.scrollHeight;
+}
 
-  runBtn.textContent = `Задача ${job_id}`;
-  showLogs(job_id);
-});
-
-function showLogs(job_id) {
+async function openJob(jobId) {
+  activeJobId = jobId;
+  rememberJob(jobId);
+  loadMyJobs();
   const logsEl = document.getElementById("logs");
   logsEl.style.display = "block";
   document.getElementById("logs-title").style.display = "block";
+  document.getElementById("logs-title").textContent = `Логи · ${jobId}`;
   logsEl.textContent = "";
+  const hint = document.getElementById("job-hint");
+  hint.style.display = "block";
+  hint.textContent = "Загрузка…";
 
+  try {
+    const jr = await apiFetch(`/api/jobs/${jobId}`);
+    const j = await jr.json();
+    if (!jr.ok) throw new Error(j.detail || "Ошибка");
+    if (j.logs && j.logs.length) logsEl.textContent = j.logs.join("\n") + "\n";
+    hint.textContent = `Статус: ${j.status}`;
+    document.getElementById("logs-title").textContent = `Логи · ${jobId} · ${j.status}`;
+  } catch (e) {
+    hint.textContent = e.message;
+  }
+
+  if (logWs) { logWs.close(); logWs = null; }
   const wsScheme = location.protocol === "https:" ? "wss:" : "ws:";
-  const ws = new WebSocket(`${wsScheme}//${location.host}/logs/${job_id}`);
-  ws.onmessage = e => {
+  const token = encodeURIComponent(getToken());
+  logWs = new WebSocket(`${wsScheme}//${location.host}/logs/${jobId}?access_token=${token}`);
+  logWs.onmessage = e => {
     const msg = JSON.parse(e.data);
-    if (msg.type === "log") {
-      logsEl.textContent += msg.text + "\n";
-      logsEl.scrollTop = logsEl.scrollHeight;
-    }
+    if (msg.type === "log") appendLogLine(logsEl, msg.text);
   };
-  ws.onclose = async () => {
-    try {
-      const jr = await fetch(`${API}/api/jobs/${job_id}`);
-      const j = await jr.json();
-      const st = j.status || "unknown";
-      logsEl.textContent += `\n--- Статус задачи: ${st} ---\n`;
-      if (st === "failed") {
-        logsEl.textContent += "Обучение завершилось с ошибкой. См. логи выше.\n";
-      }
-    } catch (_) {
-      logsEl.textContent += "\n--- Соединение с логами закрыто ---\n";
-    }
-    runBtn.textContent = "Запустить обучение";
-    runBtn.disabled = false;
+  logWs.onclose = () => {
+    logWs = null;
+    loadMyJobs();
   };
 }
+
+const dropZone = document.getElementById("drop-zone");
+const fileInput = document.getElementById("file-input");
+const runBtn = document.getElementById("run-btn");
+
+dropZone.onclick = () => fileInput.click();
+fileInput.onchange = e => {
+  const f = e.target.files[0];
+  if (f && f.name.endsWith(".ipynb")) {
+    selectedFile = f;
+    document.getElementById("file-name").textContent = "Выбран: " + f.name;
+    runBtn.disabled = false;
+  }
+};
+dropZone.ondragover = e => { e.preventDefault(); dropZone.classList.add("drag-over"); };
+dropZone.ondragleave = () => dropZone.classList.remove("drag-over");
+dropZone.ondrop = e => {
+  e.preventDefault();
+  dropZone.classList.remove("drag-over");
+  const f = e.dataTransfer.files[0];
+  if (f) fileInput.dispatchEvent(new Event("change"));
+  selectedFile = f;
+};
+
+runBtn.onclick = async () => {
+  if (!selectedFile) return;
+  runBtn.disabled = true;
+  const form = new FormData();
+  form.append("file", selectedFile);
+  form.append("shard_world_size", String(parseInt(document.getElementById("shard-n").value, 10) || 1));
+  try {
+    const r = await apiFetch("/api/submit", { method: "POST", body: form });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.detail || "Ошибка отправки");
+    openJob(data.job_id);
+    loadMyJobs();
+  } catch (e) {
+    alert(e.message);
+  }
+  runBtn.disabled = false;
+};
+
+setInterval(() => {
+  if (getToken()) { loadWorkers(); loadMyJobs(); }
+}, 5000);
+
+tryRestoreSession();
 </script>
 </body>
 </html>

@@ -15,25 +15,30 @@ from typing import Optional
 import uvicorn
 from fastapi import (
     APIRouter,
+    Depends,
     FastAPI,
     File,
     Form,
+    Header,
     HTTPException,
     UploadFile,
     WebSocket,
     WebSocketDisconnect,
 )
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel, Field
 
 _REPO = Path(__file__).resolve().parents[1]
 if str(_REPO) not in sys.path:
     sys.path.insert(0, str(_REPO))
 
 from distgpu.executor import notebook_to_ddp_script
+from scheduler.auth_tokens import create_access_token, user_from_token
 from scheduler.dispatcher import Dispatcher
 from scheduler.health_monitor import HealthMonitor
 from scheduler.job_queue import Job, JobQueue, JobStatus
 from scheduler.state_store import JobStateStore
+from scheduler.user_store import User, UserStore
 from scheduler.worker_registry import Worker, WorkerRegistry, WorkerStatus
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
@@ -41,7 +46,9 @@ STATIC_DIR = Path(__file__).resolve().parent / "static"
 _DATA_DIR = Path(
     os.getenv("DISTGPU_DATA_DIR", str(_REPO / ".distgpu_data"))
 )
-_state_store = JobStateStore(_DATA_DIR / "coordinator.sqlite")
+_DB_PATH = _DATA_DIR / "coordinator.sqlite"
+_state_store = JobStateStore(_DB_PATH)
+user_store = UserStore(_DB_PATH)
 queue = JobQueue(store=_state_store)
 registry = WorkerRegistry()
 dispatch = Dispatcher(queue, registry)
@@ -51,6 +58,26 @@ queue.set_on_changed(dispatch.wake)
 
 def _worker_token() -> str:
     return os.getenv("WORKER_TOKEN") or os.getenv("TOKEN") or "secret-token-123"
+
+
+class AuthBody(BaseModel):
+    username: str = Field(..., min_length=3, max_length=32)
+    password: str = Field(..., min_length=8, max_length=128)
+
+
+def _extract_bearer(authorization: Optional[str] = Header(None)) -> str:
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Требуется авторизация")
+    return authorization[7:].strip()
+
+
+def get_current_user(token: str = Depends(_extract_bearer)) -> User:
+    return user_from_token(token, user_store)
+
+
+def _assert_job_owner(job: Job, user: User) -> None:
+    if job.owner_id != user.id:
+        raise HTTPException(status_code=403, detail="Нет доступа к этой задаче")
 
 
 def _run_job_payload(job: Job) -> dict:
@@ -306,6 +333,53 @@ def _worker_is_online(w: Worker) -> bool:
     )
 
 
+@app.post("/api/auth/register")
+def auth_register(body: AuthBody):
+    try:
+        user = user_store.register(body.username, body.password)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    token = create_access_token(user)
+    return {
+        "access_token": token,
+        "user": {"id": user.id, "username": user.username},
+    }
+
+
+@app.post("/api/auth/login")
+def auth_login(body: AuthBody):
+    user = user_store.authenticate(body.username, body.password)
+    if not user:
+        raise HTTPException(status_code=401, detail="Неверное имя пользователя или пароль")
+    token = create_access_token(user)
+    return {
+        "access_token": token,
+        "user": {"id": user.id, "username": user.username},
+    }
+
+
+@app.get("/api/auth/me")
+def auth_me(user: User = Depends(get_current_user)):
+    return {"id": user.id, "username": user.username}
+
+
+@app.get("/api/jobs")
+def api_list_jobs(user: User = Depends(get_current_user)):
+    jobs = queue.list_for_owner(user.id)
+    return {
+        "jobs": [
+            {
+                "id": j.id,
+                "status": j.status.value,
+                "created_at": j.created_at,
+                "shard_world_size": j.shard_world_size,
+                "assigned_worker_id": j.assigned_worker_id,
+            }
+            for j in jobs
+        ]
+    }
+
+
 @app.get("/api/health")
 def api_health():
     """Проверка, что координатор отвечает (удобно с VPS: curl http://127.0.0.1:8000/api/health)."""
@@ -364,6 +438,7 @@ async def submit_job(
     shard_world_size: int = Form(1),
     pipeline_enabled: str = Form("0"),
     pipeline_config: Optional[UploadFile] = File(None),
+    user: User = Depends(get_current_user),
 ):
     nb_bytes = await file.read()
     script = notebook_to_ddp_script(nb_bytes)
@@ -379,7 +454,7 @@ async def submit_job(
     job = Job(
         id=job_id,
         script=script,
-        owner_id="anon",
+        owner_id=user.id,
         shard_world_size=sw,
         pipeline_enabled=bool(pe and yaml_text),
         pipeline_config_yaml=yaml_text,
@@ -393,12 +468,15 @@ async def submit_job(
 
 
 @app.get("/api/jobs/{job_id}")
-def api_job(job_id: str):
+def api_job(job_id: str, user: User = Depends(get_current_user)):
     j = queue.get(job_id)
     if not j:
-        return {"error": "не найдено"}
+        raise HTTPException(status_code=404, detail="задача не найдена")
+    _assert_job_owner(j, user)
     return {
+        "id": j.id,
         "status": j.status.value,
+        "created_at": j.created_at,
         "logs": j.logs,
         "assigned_worker_id": j.assigned_worker_id,
         "backup_worker_id": j.backup_worker_id,
@@ -409,10 +487,11 @@ def api_job(job_id: str):
 
 
 @app.post("/api/jobs/{job_id}/cancel")
-async def api_cancel_job(job_id: str):
+async def api_cancel_job(job_id: str, user: User = Depends(get_current_user)):
     job = queue.get(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="задача не найдена")
+    _assert_job_owner(job, user)
     if job.status != JobStatus.RUNNING:
         raise HTTPException(
             status_code=409,
@@ -462,11 +541,23 @@ async def api_cancel_job(job_id: str):
 
 @app.websocket("/logs/{job_id}")
 async def log_ws(ws: WebSocket, job_id: str):
-    await ws.accept()
     job = queue.get(job_id)
     if not job:
-        await ws.close()
+        await ws.close(code=4404)
         return
+    access = ws.query_params.get("access_token", "").strip()
+    if not access:
+        await ws.close(code=4401)
+        return
+    try:
+        user = user_from_token(access, user_store)
+    except HTTPException:
+        await ws.close(code=4403)
+        return
+    if job.owner_id != user.id:
+        await ws.close(code=4403)
+        return
+    await ws.accept()
     job.subscribers.append(ws)
     try:
         for line in job.logs:
