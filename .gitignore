@@ -1,0 +1,43 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+env/
+
+# Секреты и локальная конфигурация
+.env
+.env.local
+.env.*.local
+
+# Данные координатора (SQLite, чекпоинты, логи)
+.distgpu_data/
+
+# Сборка нативного воркера
+worker/native/build/
+worker/native/cmake-build-*/
+worker/native/distgpu-worker
+worker/native/distgpu-worker.exe
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# ОС
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Тесты / типизация
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
