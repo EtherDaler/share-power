@@ -1,0 +1,17 @@
+d_model: 3072
+pipeline:
+  num_stages: 3
+  model_type: transformer
+  layer_attr: "model.layers"
+  balance_by: count
+fsdp:
+  enabled: true
+  sharding_strategy: FULL_SHARD
+subspace:
+  enabled: true
+  rank: 64
+  learn_basis: true
+  error_feedback: true
+  dtype: float16
+context_parallel:
+  enabled: false

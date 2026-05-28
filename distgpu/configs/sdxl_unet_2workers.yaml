@@ -1,0 +1,15 @@
+d_model: 1280
+pipeline:
+  num_stages: 2
+  model_type: unet
+  layer_attr: "unet.down_blocks"
+  balance_by: params
+fsdp:
+  enabled: true
+subspace:
+  enabled: true
+  rank: 128
+  learn_basis: false
+  error_feedback: true
+context_parallel:
+  enabled: false

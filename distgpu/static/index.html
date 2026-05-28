@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <title>DistGPU</title>
+  <style>
+    body { font-family: sans-serif; max-width: 900px; margin: 40px auto; padding: 0 20px; }
+    .summary {
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+      gap: 12px; margin: 16px 0 24px;
+    }
+    .stat {
+      background: #f5f5f5; border-radius: 8px; padding: 14px 16px;
+      border: 1px solid #e0e0e0;
+    }
+    .stat .value { font-size: 28px; font-weight: 700; color: #5e35b1; line-height: 1.2; }
+    .stat .label { font-size: 12px; color: #666; margin-top: 4px; }
+    .workers-grid { display: flex; flex-wrap: wrap; gap: 8px; }
+    .worker {
+      padding: 10px 14px; border-radius: 8px; font-size: 13px;
+      background: #e8f5e9; border: 1px solid #a5d6a7; min-width: 200px;
+    }
+    .worker.busy { background: #fff3e0; border-color: #ffcc80; }
+    .worker.offline { background: #fafafa; border-color: #ddd; color: #888; opacity: 0.85; }
+    .worker .id { font-size: 11px; color: #888; }
+    .worker .vram { margin-top: 4px; }
+    #drop-zone { border: 2px dashed #ccc; border-radius: 8px; padding: 40px;
+                 text-align: center; cursor: pointer; margin: 20px 0; }
+    #drop-zone.drag-over { border-color: #7c4dff; background: #f3f0ff; }
+    #logs { background: #1e1e1e; color: #d4d4d4; padding: 16px; border-radius: 8px;
+            font-family: monospace; font-size: 12px; height: 400px;
+            overflow-y: auto; white-space: pre-wrap; display: none; }
+    button { padding: 10px 24px; background: #7c4dff; color: white;
+             border: none; border-radius: 6px; cursor: pointer; font-size: 15px; }
+    button:disabled { background: #ccc; cursor: not-allowed; }
+  </style>
+</head>
+<body>
+  <h1>DistGPU</h1>
+
+  <h3>Мощность кластера</h3>
+  <div class="summary" id="workers-summary">
+    <div class="stat"><div class="value" id="stat-online">—</div><div class="label">воркеров онлайн</div></div>
+    <div class="stat"><div class="value" id="stat-idle">—</div><div class="label">свободны</div></div>
+    <div class="stat"><div class="value" id="stat-vram-total">—</div><div class="label">суммарно VRAM</div></div>
+    <div class="stat"><div class="value" id="stat-vram-free">—</div><div class="label">свободно (idle)</div></div>
+  </div>
+
+  <h3>Воркеры</h3>
+  <div id="workers-list" class="workers-grid">Загрузка...</div>
+
+  <h3>Загрузить задачу</h3>
+  <div id="drop-zone">
+    Перетащите .ipynb сюда или кликните для выбора
+    <input type="file" id="file-input" accept=".ipynb" style="display:none">
+  </div>
+  <div id="file-name" style="color:#666; margin-bottom:12px;"></div>
+  <label style="display:block; margin:12px 0 8px;">
+    Воркеров под FSDP (шардирование памяти), 1 = один GPU без группы
+    <input type="number" id="shard-n" min="1" max="16" value="1"
+           style="margin-left:8px; width:64px;">
+  </label>
+  <button id="run-btn" disabled>Запустить обучение</button>
+
+  <h3 id="logs-title" style="display:none">Логи</h3>
+  <div id="logs"></div>
+
+<script>
+const API = "";
+
+function formatMb(mb) {
+  if (!mb || mb <= 0) return "—";
+  if (mb >= 1024) return (mb / 1024).toFixed(1) + " GB";
+  return mb + " MB";
+}
+
+function statusLabel(w) {
+  if (!w.online) return "офлайн";
+  if (w.status === "idle") return "свободен";
+  if (w.status === "busy") return "занят";
+  return w.status;
+}
+
+async function loadWorkers() {
+  const r = await fetch(`${API}/api/workers`);
+  const data = await r.json();
+  const summary = data.summary || {};
+  const workers = data.workers || (Array.isArray(data) ? data : []);
+
+  document.getElementById("stat-online").textContent = summary.online ?? 0;
+  document.getElementById("stat-idle").textContent = summary.idle ?? 0;
+  document.getElementById("stat-vram-total").textContent = formatMb(summary.total_vram_mb);
+  document.getElementById("stat-vram-free").textContent = formatMb(summary.available_vram_mb);
+
+  const el = document.getElementById("workers-list");
+  if (!workers.length) {
+    el.innerHTML = '<span style="color:#999">Нет зарегистрированных воркеров</span>';
+    return;
+  }
+
+  const online = workers.filter(w => w.online);
+  if (!online.length) {
+    el.innerHTML = '<span style="color:#999">Нет подключённых воркеров</span>';
+    return;
+  }
+
+  el.innerHTML = workers
+    .filter(w => w.online)
+    .map(w => {
+      const g = w.gpu || {};
+      const name = g.name || (g.available === false ? "нет CUDA" : "GPU");
+      const total = g.vram_total_mb || 0;
+      const free = g.vram_free_mb ?? total;
+      const busy = w.status === "busy";
+      return `
+    <div class="worker ${busy ? "busy" : ""}">
+      <div><strong>${name}</strong></div>
+      <div class="vram">${formatMb(total)} всего · ${formatMb(free)} свободно</div>
+      <div><b>${statusLabel(w)}</b>${w.current_job_id ? " · job " + w.current_job_id : ""}</div>
+      <div class="id">id ${w.id}</div>
+    </div>`;
+    }).join("");
+}
+setInterval(loadWorkers, 3000);
+loadWorkers();
+
+let selectedFile = null;
+const dropZone = document.getElementById("drop-zone");
+const fileInput = document.getElementById("file-input");
+const runBtn   = document.getElementById("run-btn");
+
+dropZone.addEventListener("click", () => fileInput.click());
+fileInput.addEventListener("change", e => selectFile(e.target.files[0]));
+dropZone.addEventListener("dragover", e => { e.preventDefault(); dropZone.classList.add("drag-over"); });
+dropZone.addEventListener("dragleave", () => dropZone.classList.remove("drag-over"));
+dropZone.addEventListener("drop", e => {
+  e.preventDefault();
+  dropZone.classList.remove("drag-over");
+  selectFile(e.dataTransfer.files[0]);
+});
+
+function selectFile(file) {
+  if (!file || !file.name.endsWith(".ipynb")) return;
+  selectedFile = file;
+  document.getElementById("file-name").textContent = `Выбран: ${file.name}`;
+  runBtn.disabled = false;
+}
+
+runBtn.addEventListener("click", async () => {
+  if (!selectedFile) return;
+  runBtn.disabled = true;
+  runBtn.textContent = "Отправка...";
+
+  const form = new FormData();
+  form.append("file", selectedFile);
+  const sn = document.getElementById("shard-n");
+  form.append("shard_world_size", sn ? String(parseInt(sn.value, 10) || 1) : "1");
+
+  const r = await fetch(`${API}/api/submit`, { method: "POST", body: form });
+  const { job_id } = await r.json();
+
+  runBtn.textContent = `Задача ${job_id}`;
+  showLogs(job_id);
+});
+
+function showLogs(job_id) {
+  const logsEl = document.getElementById("logs");
+  logsEl.style.display = "block";
+  document.getElementById("logs-title").style.display = "block";
+  logsEl.textContent = "";
+
+  const wsScheme = location.protocol === "https:" ? "wss:" : "ws:";
+  const ws = new WebSocket(`${wsScheme}//${location.host}/logs/${job_id}`);
+  ws.onmessage = e => {
+    const msg = JSON.parse(e.data);
+    if (msg.type === "log") {
+      logsEl.textContent += msg.text + "\n";
+      logsEl.scrollTop = logsEl.scrollHeight;
+    }
+  };
+  ws.onclose = () => {
+    logsEl.textContent += "\n--- Задача завершена ---";
+    runBtn.textContent = "Запустить обучение";
+    runBtn.disabled = false;
+  };
+}
+</script>
+</body>
+</html>

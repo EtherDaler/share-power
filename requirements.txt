@@ -1,0 +1,2 @@
+# Координатор и гибридный конфиг (HybridConfig.from_yaml)
+pyyaml>=6.0

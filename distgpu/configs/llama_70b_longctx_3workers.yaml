@@ -1,0 +1,18 @@
+d_model: 8192
+pipeline:
+  num_stages: 3
+  model_type: transformer
+  layer_attr: "model.layers"
+  balance_by: params
+fsdp:
+  enabled: true
+subspace:
+  enabled: true
+  rank: 128
+  error_feedback: true
+context_parallel:
+  enabled: true
+  seq_chunk_size: 8192
+  n_subspaces: 4
+  rank: 32
+  min_seq_len: 16384

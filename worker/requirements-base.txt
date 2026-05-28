@@ -1,0 +1,2 @@
+# Зависимости воркера без PyTorch (torch ставит install-скрипт под вашу CUDA / ОС).
+websockets>=12.0
