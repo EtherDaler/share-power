@@ -11,13 +11,13 @@
 - **Координатор**: Python 3.10+, CUDA не обязательна на сервере.
 - **Воркер**: NVIDIA GPU, драйвер, **Python с PyTorch (CUDA)** для запуска присланного скрипта обучения.
 
-Зависимости координатора (типичный набор):
+Зависимости координатора:
 
 ```bash
-pip install fastapi "uvicorn[standard]" websockets nbformat pyyaml
+pip install -r requirements.txt
 ```
 
-В корне репозитория есть [`requirements.txt`](requirements.txt) с **PyYAML** (нужен для `HybridConfig.from_yaml` и опциональной загрузки pipeline-конфига при submit).
+В [`requirements.txt`](requirements.txt): FastAPI, uvicorn, websockets, nbformat (конвертация `.ipynb`), PyYAML (гибридный конфиг и `pipeline_config` при submit).
 
 ---
 
@@ -50,7 +50,29 @@ python worker.py
 
 **Нативный C++-воркер** (без Python для клиента): `worker/native/` — см. [AGENTS.MD](AGENTS.MD).
 
-Откройте в браузере `http://<HOST>:8000`, загрузите `.ipynb` и при необходимости укажите `shard_world_size` для FSDP-группы.
+Откройте в браузере `http://<публичный-IP-VPS>:8000` (не `127.0.0.1`, если сидите не на самом сервере), загрузите `.ipynb` и при необходимости укажите `shard_world_size` для FSDP-группы.
+
+### Запуск на VPS (если веб не открывается)
+
+1. **Координатор слушает все интерфейсы** (по умолчанию `HOST=0.0.0.0`). Не задавайте `HOST=127.0.0.1` на VPS.
+2. **На сервере** проверьте, что процесс жив и порт открыт:
+   ```bash
+   curl -s http://127.0.0.1:8000/api/health
+   ss -tlnp | grep 8000
+   ```
+   Ожидается `{"ok":true,...}` и строка с `0.0.0.0:8000` или `*:8000`.
+3. **С вашего ПК** (подставьте IP VPS):
+   ```bash
+   curl -s http://ВАШ_IP:8000/api/health
+   ```
+   Если на VPS работает, а с ПК — нет, проблема в **firewall** или **security group** облака: откройте входящие **TCP 8000** (веб) и **8765** (воркеры).
+4. **ufw** (Ubuntu):
+   ```bash
+   sudo ufw allow 8000/tcp
+   sudo ufw allow 8765/tcp
+   sudo ufw reload
+   ```
+5. Запуск из **корня репозитория** с зависимостями: `pip install -r requirements.txt`, затем `export PYTHONPATH="$(pwd)"` и `python -m distgpu.coordinator`.
 
 ---
 

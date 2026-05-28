@@ -289,6 +289,12 @@ def _worker_is_online(w: Worker) -> bool:
     )
 
 
+@app.get("/api/health")
+def api_health():
+    """Проверка, что координатор отвечает (удобно с VPS: curl http://127.0.0.1:8000/api/health)."""
+    return {"ok": True, "service": "distgpu-coordinator"}
+
+
 @app.get("/api/workers")
 def api_workers():
     workers_out = []
@@ -474,12 +480,24 @@ if __name__ == "__main__":
         )
     host = os.getenv("HOST", "0.0.0.0")
     port = int(os.getenv("PORT", "8000"))
+    worker_port = int(os.getenv("WORKER_PORT", "8765"))
     log_level = os.getenv("LOG_LEVEL", "info")
-    print(
-        f"[Coordinator] UI/API: http://{host}:{port}/  "
-        f"WS логов: ws://{host}:{port}/logs/{{job_id}}"
-    )
-    print(
-        "[Coordinator] Воркеры слушают WORKER_HOST:WORKER_PORT (см. лог при старте lifespan)"
-    )
+    bind = host if host not in ("0.0.0.0", "::") else "0.0.0.0"
+    print("[Coordinator] Запуск…")
+    print(f"[Coordinator] UI/API:     http://{bind}:{port}/")
+    print(f"[Coordinator] Health:     http://{bind}:{port}/api/health")
+    print(f"[Coordinator] WS логов:   ws://{bind}:{port}/logs/{{job_id}}")
+    print(f"[Coordinator] WS воркеры: ws://{bind}:{worker_port}/worker")
+    if host in ("127.0.0.1", "localhost", "::1"):
+        print(
+            "[Coordinator] ВНИМАНИЕ: HOST=127.0.0.1 — с других машин веб не откроется. "
+            "На VPS задайте: export HOST=0.0.0.0"
+        )
+    elif host == "0.0.0.0":
+        print(
+            "[Coordinator] С браузера откройте http://<публичный-IP-VPS>:{port}/ "
+            "(не 127.0.0.1). Откройте порты {port} и {wp} в firewall / security group.".format(
+                port=port, wp=worker_port
+            )
+        )
     uvicorn.run(app, host=host, port=port, log_level=log_level)
